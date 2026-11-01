@@ -1,6 +1,12 @@
 name: Desktop installers
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a preview release after all installers pass verification
+        type: boolean
+        required: true
+        default: false
 permissions:
   contents: read
 jobs:
@@ -43,3 +49,80 @@ jobs:
             releases/desktop/*.dmg
             releases/desktop/*.exe
           if-no-files-found: error
+  release:
+    if: inputs.publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: poie-*
+          path: release
+          merge-multiple: true
+      - name: Prepare source and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          export VERSION="$version"
+          git archive --format=zip --prefix="poie-$version/" --output="release/poie-$version-source.zip" HEAD
+          python3 - <<'PY'
+          import hashlib, os
+          from pathlib import Path
+          version = os.environ['VERSION']
+          root = Path('release')
+          names = [f'poie-{version}-mac-arm64.dmg', f'poie-{version}-mac-x64.dmg', f'poie-{version}-win-x64.exe', f'poie-{version}-source.zip']
+          if {p.name for p in root.iterdir()} != set(names):
+              raise SystemExit('Unexpected or missing release artifacts')
+          lines = []
+          for name in names:
+              path = root / name
+              if path.stat().st_size == 0:
+                  raise SystemExit(f'Empty artifact: {name}')
+              with path.open('rb') as stream:
+                  digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+              lines.append(f'{digest}  {name}\n')
+          (root / 'SHA256SUMS.txt').write_text(''.join(lines))
+          PY
+      - name: Upload and verify preview release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          title="poie $version · 预览版"
+          notes="docs/releases/$tag.md"
+          test -s "$notes"
+          if gh release view "$tag" --json isDraft > /tmp/poie-release-state.json; then
+            python3 -c 'import json; assert json.load(open("/tmp/poie-release-state.json"))["isDraft"], "Release is already public; refusing to replace it"'
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --title "$title" --notes-file "$notes" --draft --prerelease
+          fi
+          gh release upload "$tag" release/* --clobber
+          gh api "repos/$GH_REPO/releases/tags/$tag" > /tmp/poie-release-assets.json
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          local = {p.name: p for p in Path('release').iterdir()}
+          remote = {a['name']: a for a in json.load(open('/tmp/poie-release-assets.json'))['assets']}
+          if local.keys() != remote.keys():
+              raise SystemExit('Release attachment list does not match')
+          for name, path in local.items():
+              asset = remote[name]
+              if asset['state'] != 'uploaded' or asset['size'] != path.stat().st_size:
+                  raise SystemExit(f'Upload verification failed: {name}')
+              with path.open('rb') as stream:
+                  expected = 'sha256:' + hashlib.file_digest(stream, 'sha256').hexdigest()
+              if asset.get('digest') != expected:
+                  raise SystemExit(f'Checksum verification failed: {name}')
+          print('All five release attachments verified')
+          PY
+          gh release edit "$tag" --target "$GITHUB_SHA" --title "$title" --notes-file "$notes" --prerelease --draft=false
