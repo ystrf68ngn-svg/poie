@@ -1,0 +1,27 @@
+import { mkdir, cp, writeFile, rm, chmod, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
+import { build } from "esbuild";
+import { copyResearchLicenses } from "./runtime-licenses.mjs";
+const root = fileURLToPath(new URL("../", import.meta.url));
+const out = join(root, "releases", "poie-standalone");
+const run = (bin, args) => new Promise((resolve, reject) => { const child = spawn(bin, args, { cwd: root, stdio: "inherit" }); child.on("error", reject); child.on("exit", code => code ? reject(new Error(`打包失败：${code}`)) : resolve()); });
+await run(process.execPath, ["node_modules/vite/bin/vite.js", "build", "--config", "vite.local.config.ts"]);
+await rm(out, { recursive: true, force: true }); await mkdir(join(out, "scripts"), { recursive: true });
+for (const name of ["dist/local", "project-skills", "启动poie.command", "启动poie.cmd", "start-tongpin.sh", "README.md"]) await cp(join(root, name), join(out, name), { recursive: true });
+for (const name of ["start-local.mjs", "setup-memory.mjs", "hy-memory-bridge.py"]) await cp(join(root, "scripts", name), join(out, "scripts", name));
+for (const name of ["local-server.mjs", "pdf-text-worker.mjs"]) await build({ entryPoints: [join(root, "scripts", name)], outfile: join(out, "scripts", name), bundle: true, platform: "node", target: "node22", format: "esm", legalComments: "linked", banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" } });
+await copyResearchLicenses(root, join(out, "third-party"));
+const { version } = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+const pkg = { name: "poie-standalone", version, private: true, type: "module", engines: { node: ">=22.18.0" }, scripts: { start: "node scripts/start-local.mjs", local: "node scripts/start-local.mjs", "memory:install": "node scripts/setup-memory.mjs" }, dependencies: { zod: "3.25.76" } };
+await writeFile(join(out, "package.json"), JSON.stringify(pkg, null, 2));
+// Retain the launcher dependency check; the service and PDF worker are self-contained bundles.
+await cp(join(root, "node_modules/zod"), join(out, "node_modules/zod"), { recursive: true });
+await writeFile(join(out, "开始使用.txt"), `poie 源码浏览器版 ${version}\n\n1. 安装 Node.js 22.18+ 或 24：https://nodejs.org/\n2. 解压后，macOS 双击 启动poie.command；Windows 双击 启动poie.cmd；Linux 运行 sh start-tongpin.sh。\n3. 自动打开默认浏览器 http://127.0.0.1:4318/，保持启动窗口打开。\n4. 在模型连接填写任意兼容 API 地址和密钥，或选择自己的本机 Codex / Claude Code 登录。完全不需要 ChatGPT。\n5. Hy-Memory 引擎是可选安装项，先安装 Python 3.11–3.13，再运行 npm run memory:install；在界面配置自己的 Embedding 服务。普通文本记忆无需 Python。\n\n此包不包含任何个人聊天、密钥、记忆或登录信息。\n`);
+await chmod(join(out, "启动poie.command"), 0o755); await chmod(join(out, "start-tongpin.sh"), 0o755);
+const zip = join(root, "releases", `poie-源码浏览器版-${version}.zip`);
+await rm(zip, { force: true });
+if (process.platform === "darwin") await run("ditto", ["-c", "-k", "--keepParent", out, zip]);
+else await run("tar", ["-czf", join(root, "releases", `poie-standalone-${version}.tar.gz`), "-C", join(root, "releases"), "poie-standalone"]);
+console.log(`独立运行包已生成：${process.platform === "darwin" ? zip : join(root, "releases", `poie-standalone-${version}.tar.gz`)}`);

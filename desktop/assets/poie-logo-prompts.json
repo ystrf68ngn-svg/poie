@@ -1,0 +1,5 @@
+{
+  "mode": "built-in image_gen",
+  "approved_design": "B · 无尽之环",
+  "prompt": "Use case: identity-preserve logo asset preparation.\nInput image 1 is the APPROVED FINAL poie logo, option B \"eternal fold\". Preserve the exact symbol design: the asymmetrical infinity ribbon, larger left aperture, smaller right aperture, terracotta upper-left section, orange lower-left section, golden ochre right section, white separation cuts, existing orientations, contours, proportions and colors. Do not redesign, simplify, rotate, mirror, add a loop, or change the letter-like silhouette.\nMake the app-icon asset from this approved artwork. Remove only the \"poie\" wordmark and all typography. Center the unchanged symbol on a perfectly solid warm ivory background (#FAF9F6), in a square canvas, symbol width approximately 82 percent of the canvas and vertically centered. Use generous equal side margins. No other objects, borders, rounded-square frame, letters, labels, shadows, gradients, texture, shine, glow or 3D. This is clean final application artwork, not a mockup. The icon itself must faithfully match the attached reference. Opaque background throughout."
+}
