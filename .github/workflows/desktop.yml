@@ -1,0 +1,45 @@
+name: Desktop installers
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+  build:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: darwin-arm64
+          - os: macos-15
+            target: darwin-x64
+          - os: windows-latest
+            target: win32-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: node scripts/build-desktop.mjs ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: poie-${{ matrix.target }}
+          path: |
+            releases/desktop/*.dmg
+            releases/desktop/*.exe
+          if-no-files-found: error
