@@ -1,0 +1,60 @@
+name: Import reviewed source
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and unpack the reviewed source archive
+        id: source
+        shell: bash
+        run: |
+          if [ ! -f poie-0.9.0-source.zip ]; then
+            echo 'The reviewed archive has already been imported.'
+            echo 'imported=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 - <<'PY'
+          import hashlib, pathlib, stat, zipfile
+          archive = pathlib.Path('poie-0.9.0-source.zip')
+          expected = 'e8d77356059e1ecc30a6c1809a766cd307db02196bd8be9cc3c54fa7d0a95596'
+          assert hashlib.sha256(archive.read_bytes()).hexdigest() == expected, 'Archive digest mismatch'
+          count = 0
+          with zipfile.ZipFile(archive) as source:
+              assert source.testzip() is None, 'Invalid archive'
+              for item in source.infolist():
+                  parts = pathlib.PurePosixPath(item.filename).parts
+                  assert parts and parts[0] == 'poie-0.9.0'
+                  assert '..' not in parts
+                  if item.is_dir() or len(parts) == 1:
+                      continue
+                  relative = pathlib.PurePosixPath(*parts[1:])
+                  assert relative.parts[0] not in {'.git', '.tongpin', '.desktop', 'node_modules', 'releases'}
+                  assert not stat.S_ISLNK(item.external_attr >> 16)
+                  # Workflow files are added separately through the owner's web session.
+                  if str(relative).startswith('.github/workflows/'):
+                      continue
+                  target = pathlib.Path(str(relative))
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(source.read(item))
+                  target.chmod(0o755 if (item.external_attr >> 16) & 0o111 else 0o644)
+                  count += 1
+          assert count == 218, f'Unexpected source file count: {count}'
+          archive.unlink()
+          print(f'Imported {count} verified source files')
+          PY
+          echo 'imported=true' >> "$GITHUB_OUTPUT"
+      - name: Commit the verified snapshot
+        if: steps.source.outputs.imported == 'true'
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A -- . ':!.github/workflows/'
+          git diff --cached --name-only
+          git commit -m 'Release poie 0.9.0 reviewed source'
+          git push origin HEAD:main
