@@ -1,3 +1,4 @@
+
 name: Desktop installers
 on:
   workflow_dispatch:
@@ -107,7 +108,8 @@ jobs:
             gh release create "$tag" --target "$GITHUB_SHA" --title "$title" --notes-file "$notes" --draft --prerelease
           fi
           gh release upload "$tag" release/* --clobber
-          gh api "repos/$GH_REPO/releases/tags/$tag" > /tmp/poie-release-assets.json
+          release_api=$(gh release view "$tag" --json apiUrl --jq '.apiUrl')
+          gh api "$release_api" > /tmp/poie-release-assets.json
           python3 - <<'PY'
           import hashlib, json
           from pathlib import Path
